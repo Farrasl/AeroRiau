@@ -68,10 +68,33 @@ export default function DashboardPage() {
         fetchDashboardStats(),
       ]);
 
+      // Dynamically reflect active timeframe & filters in summary stats
+      const activeHotspots = hotspots.features.map((f) => f.properties);
+      const highConf = activeHotspots.filter((h) => h.confidence === 'high').length;
+      const peatCount = activeHotspots.filter((h) => h.isInPeatland).length;
+      const maxFRP = activeHotspots.reduce((max, h) => Math.max(max, h.frp || 0), 0);
+
+      const districtCounts: Record<string, number> = {};
+      activeHotspots.forEach((h) => {
+        const d = h.district || 'Lainnya';
+        districtCounts[d] = (districtCounts[d] || 0) + 1;
+      });
+      const topDistricts = Object.entries(districtCounts)
+        .map(([district, count]) => ({ district, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
       setHotspotsData(hotspots);
       setPeatlandsData(peatlands);
       setStationsData(stations);
-      setStats(summaryStats);
+      setStats({
+        ...summaryStats,
+        totalHotspots24h: activeHotspots.length,
+        highConfidenceCount: highConf,
+        peatlandHotspotsCount: peatCount,
+        maxFRP: parseFloat(maxFRP.toFixed(1)),
+        topDistricts,
+      });
     } catch (err) {
       console.error('Error fetching GIS data:', err);
     } finally {
@@ -92,7 +115,7 @@ export default function DashboardPage() {
       <div className="px-4 py-2 bg-slate-900/60 border-b border-slate-800">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
           <div className="w-full">
-            <StatsCards stats={stats} />
+            <StatsCards stats={stats} timeframe={timeframe} />
           </div>
         </div>
       </div>

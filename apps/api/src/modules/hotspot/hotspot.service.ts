@@ -72,9 +72,21 @@ export class HotspotService {
     let items: HotspotItem[] = [];
 
     try {
+      const now = new Date();
+      let cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      if (filters.timeframe === '48h') {
+        cutoffDate = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+      } else if (filters.timeframe === '7d') {
+        cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      }
+      const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+
       const dbHotspots = await this.prisma.hotspot.findMany({
+        where: {
+          acqDate: { gte: cutoffDateStr },
+        },
         orderBy: { acqDate: 'desc' },
-        take: 300,
+        take: 500,
       });
 
       if (dbHotspots.length > 0) {
@@ -101,12 +113,26 @@ export class HotspotService {
       }
     } catch {
       // Database not yet connected/seeded, use mock
-      items = this.generateRealisticRiauHotspots(40);
+      items = this.generateRealisticRiauHotspots(60);
     }
 
     if (items.length === 0) {
-      items = this.generateRealisticRiauHotspots(40);
+      items = this.generateRealisticRiauHotspots(60);
     }
+
+    // Apply timeframe filter
+    const nowMs = Date.now();
+    let cutoffMs = nowMs - 24 * 60 * 60 * 1000;
+    if (filters.timeframe === '48h') {
+      cutoffMs = nowMs - 48 * 60 * 60 * 1000;
+    } else if (filters.timeframe === '7d') {
+      cutoffMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+    }
+
+    items = items.filter((h) => {
+      const itemTime = h.createdAt ? new Date(h.createdAt).getTime() : new Date(h.acqDate).getTime();
+      return itemTime >= cutoffMs;
+    });
 
     // Apply filters
     if (filters.satellite && filters.satellite !== 'ALL') {
@@ -211,10 +237,9 @@ export class HotspotService {
     }
   }
 
-  public generateRealisticRiauHotspots(count = 30): HotspotItem[] {
+  public generateRealisticRiauHotspots(count = 60): HotspotItem[] {
     const hotspots: HotspotItem[] = [];
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
+    const nowMs = Date.now();
 
     // Clustered around real peatland areas in Riau:
     // Bengkalis (1.47, 102.13), Pelalawan (0.28, 101.95), Rohil (2.16, 100.82), Siak (0.79, 102.04), Dumai (1.67, 101.44)
@@ -236,6 +261,19 @@ export class HotspotService {
       const confidenceLevels: ('low' | 'nominal' | 'high')[] = ['nominal', 'nominal', 'high', 'high', 'low'];
       const conf = confidenceLevels[Math.floor(Math.random() * confidenceLevels.length)];
 
+      // Distribute ages: ~25% in last 24h, ~30% in 24h-48h, ~45% in 48h-7d
+      let ageMs = 0;
+      if (i % 4 === 0) {
+        ageMs = Math.random() * 20 * 3600 * 1000;
+      } else if (i % 4 === 1) {
+        ageMs = (24 + Math.random() * 20) * 3600 * 1000;
+      } else {
+        ageMs = (48 + Math.random() * 110) * 3600 * 1000;
+      }
+
+      const itemDate = new Date(nowMs - ageMs);
+      const dateStr = itemDate.toISOString().split('T')[0];
+
       hotspots.push({
         id: `mock-hotspot-${i + 1}`,
         latitude: parseFloat((center.lat + latOffset).toFixed(4)),
@@ -244,7 +282,7 @@ export class HotspotService {
         scan: 0.38,
         track: 0.36,
         acqDate: dateStr,
-        acqTime: `${String(Math.floor(Math.random() * 24)).padStart(2, '0')}${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`,
+        acqTime: `${String(itemDate.getHours()).padStart(2, '0')}${String(itemDate.getMinutes()).padStart(2, '0')}`,
         satellite: Math.random() > 0.3 ? 'VIIRS_SNPP' : 'MODIS',
         instrument: 'VIIRS',
         confidence: conf,
@@ -254,7 +292,7 @@ export class HotspotService {
         subDistrict: 'Kecamatan Sekitar',
         isInPeatland: isInPeat,
         peatlandType: isInPeat ? 'GAMBUT_DALAM' : undefined,
-        createdAt: new Date(Date.now() - Math.floor(Math.random() * 86400000)).toISOString(),
+        createdAt: itemDate.toISOString(),
       });
     }
 

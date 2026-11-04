@@ -25,7 +25,7 @@ export async function fetchHotspots(
     return await res.json();
   } catch {
     // Fallback client mock if backend is starting or offline
-    return getFallbackHotspots();
+    return getFallbackHotspots(filters);
   }
 }
 
@@ -86,120 +86,108 @@ export async function triggerManualSync(): Promise<{ count: number; source: stri
 // Fallback data helpers for offline / instant render
 // -------------------------------------------------------------
 
-function getFallbackHotspots(): GeoJsonFeatureCollection<HotspotItem> {
-  const mockItems: HotspotItem[] = [
-    {
-      id: 'hs-1',
-      latitude: 1.4582,
-      longitude: 101.9842,
-      brightness: 334.5,
-      acqDate: new Date().toISOString().split('T')[0],
-      acqTime: '0630',
-      satellite: 'VIIRS_SNPP',
-      instrument: 'VIIRS',
-      confidence: 'high',
-      frp: 32.4,
-      dayNight: 'D',
-      district: 'Bengkalis',
-      subDistrict: 'Bukit Batu',
-      isInPeatland: true,
-      peatlandType: 'GAMBUT_DALAM',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'hs-2',
-      latitude: 0.3842,
-      longitude: 101.8924,
-      brightness: 328.2,
-      acqDate: new Date().toISOString().split('T')[0],
-      acqTime: '0635',
-      satellite: 'VIIRS_SNPP',
-      instrument: 'VIIRS',
-      confidence: 'nominal',
-      frp: 18.2,
-      dayNight: 'D',
-      district: 'Pelalawan',
-      subDistrict: 'Teluk Meranti',
-      isInPeatland: true,
-      peatlandType: 'GAMBUT_SANGAT_DALAM',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'hs-3',
-      latitude: 2.1245,
-      longitude: 100.8241,
-      brightness: 341.0,
-      acqDate: new Date().toISOString().split('T')[0],
-      acqTime: '0632',
-      satellite: 'MODIS',
-      instrument: 'MODIS',
-      confidence: 'high',
-      frp: 41.5,
-      dayNight: 'D',
-      district: 'Rokan Hilir',
-      subDistrict: 'Kubu',
-      isInPeatland: true,
-      peatlandType: 'GAMBUT_SEDANG',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'hs-4',
-      latitude: 0.7812,
-      longitude: 101.9214,
-      brightness: 318.5,
-      acqDate: new Date().toISOString().split('T')[0],
-      acqTime: '0630',
-      satellite: 'VIIRS_SNPP',
-      instrument: 'VIIRS',
-      confidence: 'nominal',
-      frp: 12.0,
-      dayNight: 'D',
-      district: 'Siak',
-      subDistrict: 'Sungai Apit',
-      isInPeatland: false,
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'hs-5',
-      latitude: 1.6214,
-      longitude: 101.4512,
-      brightness: 322.8,
-      acqDate: new Date().toISOString().split('T')[0],
-      acqTime: '0638',
-      satellite: 'VIIRS_SNPP',
-      instrument: 'VIIRS',
-      confidence: 'high',
-      frp: 28.1,
-      dayNight: 'D',
-      district: 'Dumai',
-      subDistrict: 'Medang Kampai',
-      isInPeatland: true,
-      peatlandType: 'GAMBUT_DALAM',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'hs-6',
-      latitude: -0.3124,
-      longitude: 103.0412,
-      brightness: 312.4,
-      acqDate: new Date().toISOString().split('T')[0],
-      acqTime: '0640',
-      satellite: 'VIIRS_SNPP',
-      instrument: 'VIIRS',
-      confidence: 'low',
-      frp: 6.8,
-      dayNight: 'D',
-      district: 'Indragiri Hilir',
-      subDistrict: 'Gaung Anak Serka',
-      isInPeatland: true,
-      peatlandType: 'GAMBUT_DALAM',
-      createdAt: new Date().toISOString(),
-    },
+function getFallbackHotspots(filters: HotspotFilterParams = {}): GeoJsonFeatureCollection<HotspotItem> {
+  const now = Date.now();
+
+  // 55 Realistic hotspot distribution across Riau across 7 days
+  const baseClusters = [
+    { district: 'Bengkalis', sub: 'Bukit Batu', lat: 1.4582, lon: 101.9842, peat: true, peatType: 'GAMBUT_DALAM' },
+    { district: 'Bengkalis', sub: 'Siak Kecil', lat: 1.2841, lon: 102.1245, peat: true, peatType: 'GAMBUT_SANGAT_DALAM' },
+    { district: 'Pelalawan', sub: 'Teluk Meranti', lat: 0.3842, lon: 101.8924, peat: true, peatType: 'GAMBUT_SANGAT_DALAM' },
+    { district: 'Pelalawan', sub: 'Kuala Kampar', lat: 0.5123, lon: 103.1124, peat: true, peatType: 'GAMBUT_DALAM' },
+    { district: 'Rokan Hilir', sub: 'Kubu', lat: 2.1245, lon: 100.8241, peat: true, peatType: 'GAMBUT_SEDANG' },
+    { district: 'Rokan Hilir', sub: 'Bangko Pusako', lat: 1.8942, lon: 100.7412, peat: true, peatType: 'GAMBUT_DALAM' },
+    { district: 'Siak', sub: 'Sungai Apit', lat: 0.7812, lon: 101.9214, peat: false, peatType: undefined },
+    { district: 'Siak', sub: 'Dayun', lat: 0.6912, lon: 102.0412, peat: true, peatType: 'GAMBUT_SEDANG' },
+    { district: 'Dumai', sub: 'Medang Kampai', lat: 1.6214, lon: 101.4512, peat: true, peatType: 'GAMBUT_DALAM' },
+    { district: 'Dumai', sub: 'Sungai Sembilan', lat: 1.7412, lon: 101.2841, peat: true, peatType: 'GAMBUT_DALAM' },
+    { district: 'Indragiri Hilir', sub: 'Gaung Anak Serka', lat: -0.3124, lon: 103.0412, peat: true, peatType: 'GAMBUT_DALAM' },
+    { district: 'Indragiri Hilir', sub: 'Tempuling', lat: -0.4214, lon: 102.9412, peat: true, peatType: 'GAMBUT_SANGAT_DALAM' },
+    { district: 'Kampar', sub: 'Tambang', lat: 0.3541, lon: 101.2841, peat: false, peatType: undefined },
+    { district: 'Rokan Hulu', sub: 'Tambusai', lat: 1.1241, lon: 100.4812, peat: false, peatType: undefined },
   ];
+
+  const pool: { item: HotspotItem; ageHours: number }[] = [];
+
+  // Generate 55 deterministic items across different timeframes:
+  // 15 items in 0-24h, 15 items in 24-48h, 25 items in 48-168h
+  for (let i = 0; i < 55; i++) {
+    const cluster = baseClusters[i % baseClusters.length];
+    const latOffset = (((i * 7 + 13) % 40) - 20) * 0.008;
+    const lonOffset = (((i * 11 + 17) % 40) - 20) * 0.009;
+
+    let ageHours: number;
+    if (i < 15) {
+      // 0 - 24 hours (today)
+      ageHours = 1 + (i * 1.5);
+    } else if (i < 30) {
+      // 24 - 48 hours (yesterday)
+      ageHours = 25 + ((i - 15) * 1.4);
+    } else {
+      // 48 - 168 hours (2 - 7 days ago)
+      ageHours = 49 + ((i - 30) * 4.6);
+    }
+
+    const itemDate = new Date(now - ageHours * 3600 * 1000);
+    const dateStr = itemDate.toISOString().split('T')[0];
+    const timeStr = `${String(itemDate.getHours()).padStart(2, '0')}${String(itemDate.getMinutes()).padStart(2, '0')}`;
+
+    const conf: 'high' | 'nominal' | 'low' =
+      i % 3 === 0 ? 'high' : i % 3 === 1 ? 'nominal' : 'low';
+    const sat: 'VIIRS_SNPP' | 'MODIS' = i % 4 === 0 ? 'MODIS' : 'VIIRS_SNPP';
+    const frp = parseFloat((12 + ((i * 13) % 38)).toFixed(1));
+
+    pool.push({
+      ageHours,
+      item: {
+        id: `fallback-hs-${i + 1}`,
+        latitude: parseFloat((cluster.lat + latOffset).toFixed(4)),
+        longitude: parseFloat((cluster.lon + lonOffset).toFixed(4)),
+        brightness: parseFloat((315 + ((i * 9) % 35)).toFixed(1)),
+        acqDate: dateStr,
+        acqTime: timeStr,
+        satellite: sat,
+        instrument: sat === 'MODIS' ? 'MODIS' : 'VIIRS',
+        confidence: conf,
+        frp,
+        dayNight: (i % 2 === 0) ? 'D' : 'N',
+        district: cluster.district,
+        subDistrict: cluster.sub,
+        isInPeatland: cluster.peat,
+        peatlandType: cluster.peatType as any,
+        createdAt: itemDate.toISOString(),
+      },
+    });
+  }
+
+  // Filter by timeframe
+  const maxAge =
+    filters.timeframe === '48h' ? 48 : filters.timeframe === '7d' ? 168 : 24;
+
+  let filtered = pool
+    .filter((entry) => entry.ageHours <= maxAge)
+    .map((entry) => entry.item);
+
+  // Filter by satellite
+  if (filters.satellite && filters.satellite !== 'ALL') {
+    filtered = filtered.filter((h) => h.satellite === filters.satellite);
+  }
+
+  // Filter by confidence
+  if (filters.confidence === 'high') {
+    filtered = filtered.filter((h) => h.confidence === 'high');
+  } else if (filters.confidence === 'nominal_high') {
+    filtered = filtered.filter((h) => h.confidence === 'high' || h.confidence === 'nominal');
+  }
+
+  // Filter by peatland
+  if (filters.onlyPeatland) {
+    filtered = filtered.filter((h) => h.isInPeatland);
+  }
 
   return {
     type: 'FeatureCollection',
-    features: mockItems.map((h) => ({
+    features: filtered.map((h) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [h.longitude, h.latitude] },
       properties: h,

@@ -6,10 +6,14 @@ import { DashboardStats } from '@riau-gis/types';
 
 interface StatsCardsProps {
   stats: DashboardStats | null;
+  timeframe?: '24h' | '48h' | '7d';
 }
 
-export function StatsCards({ stats }: StatsCardsProps) {
+export function StatsCards({ stats, timeframe = '24h' }: StatsCardsProps) {
   if (!stats) return null;
+
+  const timeframeLabel =
+    timeframe === '48h' ? '48 Jam' : timeframe === '7d' ? '7 Hari' : '24 Jam';
 
   const topDistrictText = stats.topDistricts && stats.topDistricts.length > 0 
     ? `${stats.topDistricts[0].district} (${stats.topDistricts[0].count})` 
@@ -20,7 +24,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
       {/* Total Hotspot */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 shadow-sm">
         <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
-          <span>Total Hotspot (24 Jam)</span>
+          <span>Total Hotspot ({timeframeLabel})</span>
           <div className="p-1.5 rounded-lg bg-orange-500/10 text-orange-400">
             <Flame className="w-4 h-4" />
           </div>
