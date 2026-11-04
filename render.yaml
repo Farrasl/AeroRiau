@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: riau-gis-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: NASA_FIRMS_MAP_KEY
+        sync: false

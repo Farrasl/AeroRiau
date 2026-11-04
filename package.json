@@ -1,0 +1,27 @@
+{
+  "name": "gis-riau-hotspot-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistem Pemantauan Kualitas Udara & Titik Panas (Hotspot) Real-Time Riau",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "build:api": "turbo run build --filter=@riau-gis/api",
+    "build:web": "turbo run build --filter=@riau-gis/web",
+    "start:api": "npm run start --workspace=apps/api",
+    "start:web": "npm run start --workspace=apps/web",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean",
+    "db:generate": "npm run db:generate --workspace=apps/api",
+    "db:push": "npm run db:push --workspace=apps/api",
+    "db:seed": "npm run db:seed --workspace=apps/api"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.2"
+  },
+  "packageManager": "npm@10.2.0"
+}

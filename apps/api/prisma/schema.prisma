@@ -1,0 +1,117 @@
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [postgis]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+enum SatelliteType {
+  VIIRS_SNPP
+  VIIRS_NOAA20
+  MODIS
+}
+
+enum HotspotConfidence {
+  low
+  nominal
+  high
+  provisional
+}
+
+enum PeatlandType {
+  GAMBUT_DANGKAL
+  GAMBUT_SEDANG
+  GAMBUT_DALAM
+  GAMBUT_SANGAT_DALAM
+  KONSESI
+}
+
+model Hotspot {
+  id              String            @id @default(uuid())
+  latitude        Float
+  longitude       Float
+  brightness      Float
+  scan            Float?
+  track           Float?
+  acqDate         String            // YYYY-MM-DD
+  acqTime         String            // HHMM (UTC)
+  satellite       SatelliteType
+  instrument      String            @default("VIIRS") // VIIRS / MODIS
+  confidence      HotspotConfidence @default(nominal)
+  frp             Float             @default(0.0)     // Fire Radiative Power (MW)
+  dayNight        String            @default("D")     // D or N
+  district        String?           // e.g. Bengkalis, Pelalawan, Siak, Rohil
+  subDistrict     String?
+  isInPeatland    Boolean           @default(false)
+  peatlandType    String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // PostGIS spatial column: geometry(Point, 4326)
+  geom            Unsupported("geometry(Point, 4326)")?
+
+  @@index([latitude, longitude])
+  @@index([acqDate])
+  @@index([satellite])
+  @@index([confidence])
+  @@index([isInPeatland])
+  @@index([district])
+  @@map("hotspots")
+}
+
+model AirQualityStation {
+  id            String              @id @default(uuid())
+  name          String              @unique
+  city          String              // e.g. Pekanbaru, Dumai, Duri, Siak
+  latitude      Float
+  longitude     Float
+  geom          Unsupported("geometry(Point, 4326)")?
+  readings      AirQualityReading[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@map("air_quality_stations")
+}
+
+model AirQualityReading {
+  id            String             @id @default(uuid())
+  stationId     String
+  station       AirQualityStation  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  aqi           Int                // 0 - 500
+  pm25          Float              // µg/m³
+  pm10          Float?             // µg/m³
+  so2           Float?
+  co            Float?
+  o3            Float?
+  no2           Float?
+  temperature   Float?             // °C
+  humidity      Float?             // %
+  windSpeed     Float?             // km/h
+  windDirection Float?             // 0 - 360 degrees
+  recordedAt    DateTime           @default(now())
+
+  @@index([stationId])
+  @@index([recordedAt])
+  @@map("air_quality_readings")
+}
+
+model PeatlandZone {
+  id          String       @id @default(uuid())
+  name        String
+  type        PeatlandType
+  district    String
+  areaHa      Float        @default(0.0)
+  createdAt   DateTime     @default(now())
+
+  // PostGIS polygon/multipolygon
+  geom        Unsupported("geometry(MultiPolygon, 4326)")?
+
+  @@index([type])
+  @@index([district])
+  @@map("peatland_zones")
+}
