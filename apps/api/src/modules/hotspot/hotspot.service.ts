@@ -40,27 +40,39 @@ export class HotspotService {
     
     if (mapKey && mapKey !== 'YOUR_NASA_FIRMS_MAP_KEY') {
       try {
-        this.logger.log('Fetching live hotspot data from NASA FIRMS API...');
+        this.logger.log('Fetching live hotspot data from NASA FIRMS API (SNPP, NOAA20, MODIS)...');
         // Area coordinates format: W,S,E,N
         const area = `${RIAU_BBOX[0]},${RIAU_BBOX[1]},${RIAU_BBOX[2]},${RIAU_BBOX[3]}`;
-        const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey}/VIIRS_SNPP_NRT/${area}/1`;
-        
-        const response = await axios.get(url, { timeout: 15000 });
-        if (response.data && typeof response.data === 'string') {
-          const parsed = this.parseFirmsCsv(response.data);
-          if (parsed.length > 0) {
-            await this.saveHotspots(parsed);
-            return { count: parsed.length, source: 'NASA_FIRMS_LIVE' };
+        const sources = ['VIIRS_SNPP_NRT', 'VIIRS_NOAA20_NRT', 'MODIS_NRT'];
+        const allParsed: HotspotItem[] = [];
+
+        for (const src of sources) {
+          try {
+            // NASA FIRMS Area NRT supports range 1..5 days
+            const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey}/${src}/${area}/5`;
+            const response = await axios.get(url, { timeout: 12000 });
+            if (response.data && typeof response.data === 'string') {
+              const parsed = this.parseFirmsCsv(response.data);
+              allParsed.push(...parsed);
+            }
+          } catch (srcErr: any) {
+            this.logger.warn(`NASA FIRMS fetch for ${src} failed: ${srcErr.message}`);
           }
         }
+
+        if (allParsed.length > 0) {
+          await this.saveHotspots(allParsed);
+          this.logger.log(`Saved ${allParsed.length} live hotspots from NASA FIRMS.`);
+          return { count: allParsed.length, source: 'NASA_FIRMS_LIVE' };
+        }
       } catch (err: any) {
-        this.logger.warn(`NASA FIRMS fetch failed (${err.message}). Using local Riau mock generator.`);
+        this.logger.warn(`NASA FIRMS sync encountered an error (${err.message}). Using local Riau mock generator.`);
       }
     } else {
       this.logger.log('NASA_FIRMS_MAP_KEY not yet configured. Generating mock hotspots for Riau.');
     }
 
-    const mockHotspots = this.generateRealisticRiauHotspots(35);
+    const mockHotspots = this.generateRealisticRiauHotspots(55);
     await this.saveHotspots(mockHotspots);
     return { count: mockHotspots.length, source: 'MOCK_RIAU_GENERATOR' };
   }
@@ -71,16 +83,17 @@ export class HotspotService {
   async getHotspotsGeoJson(filters: HotspotFilterParams): Promise<GeoJsonFeatureCollection<HotspotItem>> {
     let items: HotspotItem[] = [];
 
-    try {
-      const now = new Date();
-      let cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      if (filters.timeframe === '48h') {
-        cutoffDate = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-      } else if (filters.timeframe === '7d') {
-        cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      }
-      const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+    const nowMs = Date.now();
+    let cutoffMs = nowMs - 24 * 60 * 60 * 1000;
+    if (filters.timeframe === '48h') {
+      cutoffMs = nowMs - 48 * 60 * 60 * 1000;
+    } else if (filters.timeframe === '7d') {
+      cutoffMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+    }
+    const cutoffDate = new Date(cutoffMs);
+    const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
 
+    try {
       const dbHotspots = await this.prisma.hotspot.findMany({
         where: {
           acqDate: { gte: cutoffDateStr },
@@ -110,42 +123,54 @@ export class HotspotService {
           peatlandType: h.peatlandType || undefined,
           createdAt: h.createdAt.toISOString(),
         }));
+
+        // Filter database items by exact acquisition timestamp
+        items = items.filter((h) => {
+          let itemTime: number;
+          if (h.acqDate) {
+            const timeStr = (h.acqTime || '1200').padStart(4, '0');
+            const hh = timeStr.slice(0, 2);
+            const mm = timeStr.slice(2, 4);
+            const parsed = new Date(`${h.acqDate}T${hh}:${mm}:00Z`).getTime();
+            itemTime = isNaN(parsed) ? new Date(h.createdAt).getTime() : parsed;
+          } else {
+            itemTime = new Date(h.createdAt).getTime();
+          }
+          return itemTime >= cutoffMs;
+        });
       }
-    } catch {
-      // Database not yet connected/seeded, use mock
-      items = this.generateRealisticRiauHotspots(60);
+    } catch (err: any) {
+      this.logger.warn(`Hotspots DB query failed: ${err.message}. Using fallback mock data.`);
     }
 
+    // Critical fix: If DB returned 0 records for this timeframe (e.g. 48h),
+    // generate realistic Riau mock hotspots for that timeframe
     if (items.length === 0) {
-      items = this.generateRealisticRiauHotspots(60);
+      const mockPool = this.generateRealisticRiauHotspots(60);
+      items = mockPool.filter((h) => {
+        const itemTime = new Date(h.createdAt).getTime();
+        return itemTime >= cutoffMs;
+      });
     }
 
-    // Apply timeframe filter
-    const nowMs = Date.now();
-    let cutoffMs = nowMs - 24 * 60 * 60 * 1000;
-    if (filters.timeframe === '48h') {
-      cutoffMs = nowMs - 48 * 60 * 60 * 1000;
-    } else if (filters.timeframe === '7d') {
-      cutoffMs = nowMs - 7 * 24 * 60 * 60 * 1000;
-    }
-
-    items = items.filter((h) => {
-      const itemTime = h.createdAt ? new Date(h.createdAt).getTime() : new Date(h.acqDate).getTime();
-      return itemTime >= cutoffMs;
-    });
-
-    // Apply filters
+    // Apply satellite filter
     if (filters.satellite && filters.satellite !== 'ALL') {
       items = items.filter((h) => h.satellite === filters.satellite);
     }
+
+    // Apply confidence filter
     if (filters.confidence === 'high') {
       items = items.filter((h) => h.confidence === 'high');
     } else if (filters.confidence === 'nominal_high') {
       items = items.filter((h) => h.confidence === 'high' || h.confidence === 'nominal');
     }
+
+    // Apply peatland filter
     if (filters.onlyPeatland) {
       items = items.filter((h) => h.isInPeatland);
     }
+
+    // Apply district filter
     if (filters.district) {
       items = items.filter((h) => h.district?.toLowerCase() === filters.district?.toLowerCase());
     }
@@ -181,26 +206,66 @@ export class HotspotService {
       const lon = parseFloat(row.longitude);
       const frp = parseFloat(row.frp || '0');
       const brightness = parseFloat(row.bright_ti4 || row.brightness || '320');
-      const confidence = (row.confidence === 'h' ? 'high' : row.confidence === 'l' ? 'low' : 'nominal') as any;
+
+      // Confidence parsing for both VIIRS ('l', 'n', 'h') and MODIS (0-100 percentage)
+      let confidence: 'low' | 'nominal' | 'high' = 'nominal';
+      const confRaw = (row.confidence || '').toLowerCase();
+      if (confRaw === 'h' || confRaw === 'high') {
+        confidence = 'high';
+      } else if (confRaw === 'l' || confRaw === 'low') {
+        confidence = 'low';
+      } else {
+        const confNum = parseInt(confRaw, 10);
+        if (!isNaN(confNum)) {
+          confidence = confNum >= 80 ? 'high' : confNum >= 30 ? 'nominal' : 'low';
+        } else {
+          confidence = 'nominal';
+        }
+      }
+
+      // Satellite & instrument detection
+      let satellite: 'VIIRS_SNPP' | 'VIIRS_NOAA20' | 'MODIS' = 'VIIRS_SNPP';
+      let instrument: 'VIIRS' | 'MODIS' = 'VIIRS';
+      const satRaw = (row.satellite || '').toUpperCase();
+      const instRaw = (row.instrument || '').toUpperCase();
+
+      if (instRaw === 'MODIS' || satRaw === 'TERRA' || satRaw === 'AQUA') {
+        satellite = 'MODIS';
+        instrument = 'MODIS';
+      } else if (satRaw === 'N20' || satRaw.includes('NOAA-20') || satRaw.includes('NOAA20')) {
+        satellite = 'VIIRS_NOAA20';
+        instrument = 'VIIRS';
+      } else {
+        satellite = 'VIIRS_SNPP';
+        instrument = 'VIIRS';
+      }
+
+      // Exact acquisition timestamp
+      const timeStr = (row.acq_time || '0000').padStart(4, '0');
+      const hh = timeStr.slice(0, 2);
+      const mm = timeStr.slice(2, 4);
+      const isoDate = `${row.acq_date}T${hh}:${mm}:00Z`;
+      const parsedDate = new Date(isoDate);
+      const createdAt = isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString();
 
       results.push({
-        id: `firms-${row.acq_date}-${row.acq_time}-${i}`,
+        id: `firms-${satellite}-${row.acq_date}-${timeStr}-${lat.toFixed(4)}-${lon.toFixed(4)}`,
         latitude: lat,
         longitude: lon,
         brightness,
         scan: parseFloat(row.scan || '0.38'),
         track: parseFloat(row.track || '0.36'),
         acqDate: row.acq_date,
-        acqTime: row.acq_time,
-        satellite: 'VIIRS_SNPP',
-        instrument: 'VIIRS',
+        acqTime: timeStr,
+        satellite,
+        instrument,
         confidence,
         frp,
         dayNight: (row.daynight === 'N' ? 'N' : 'D') as any,
         district: this.estimateDistrict(lat, lon),
         isInPeatland: Math.random() > 0.4,
         peatlandType: 'GAMBUT_DALAM',
-        createdAt: new Date().toISOString(),
+        createdAt,
       });
     }
 
@@ -211,9 +276,26 @@ export class HotspotService {
     try {
       for (const h of hotspots) {
         await this.prisma.$executeRawUnsafe(
-          `INSERT INTO hotspots (id, latitude, longitude, brightness, scan, track, "acqDate", "acqTime", satellite, instrument, confidence, frp, "dayNight", district, "isInPeatland", "peatlandType", "updatedAt", geom)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::"SatelliteType", $10, $11::"HotspotConfidence", $12, $13, $14, $15, $16, NOW(), ST_SetSRID(ST_MakePoint($3, $2), 4326))
-           ON CONFLICT (id) DO UPDATE SET frp = EXCLUDED.frp, "updatedAt" = NOW();`,
+          `INSERT INTO hotspots (id, latitude, longitude, brightness, scan, track, "acqDate", "acqTime", satellite, instrument, confidence, frp, "dayNight", district, "isInPeatland", "peatlandType", "createdAt", "updatedAt", geom)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::"SatelliteType", $10, $11::"HotspotConfidence", $12, $13, $14, $15, $16, $17::timestamptz, NOW(), ST_SetSRID(ST_MakePoint($3, $2), 4326))
+           ON CONFLICT (id) DO UPDATE SET 
+             latitude = EXCLUDED.latitude,
+             longitude = EXCLUDED.longitude,
+             brightness = EXCLUDED.brightness,
+             scan = EXCLUDED.scan,
+             track = EXCLUDED.track,
+             "acqDate" = EXCLUDED."acqDate",
+             "acqTime" = EXCLUDED."acqTime",
+             satellite = EXCLUDED.satellite,
+             instrument = EXCLUDED.instrument,
+             confidence = EXCLUDED.confidence,
+             frp = EXCLUDED.frp,
+             "dayNight" = EXCLUDED."dayNight",
+             district = EXCLUDED.district,
+             "isInPeatland" = EXCLUDED."isInPeatland",
+             "peatlandType" = EXCLUDED."peatlandType",
+             "createdAt" = EXCLUDED."createdAt",
+             "updatedAt" = NOW();`,
           h.id,
           h.latitude,
           h.longitude,
@@ -230,6 +312,7 @@ export class HotspotService {
           h.district ?? 'Riau',
           h.isInPeatland,
           h.peatlandType ?? null,
+          h.createdAt || new Date().toISOString(),
         );
       }
     } catch (e: any) {
