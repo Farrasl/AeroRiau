@@ -72,7 +72,10 @@ export interface PeatlandZone {
   type: 'GAMBUT_DANGKAL' | 'GAMBUT_SEDANG' | 'GAMBUT_DALAM' | 'GAMBUT_SANGAT_DALAM' | 'KONSESI';
   district: string;
   areaHa: number;
-  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  geometry: {
+    type: 'Polygon' | 'MultiPolygon';
+    coordinates: any;
+  };
 }
 
 export interface HotspotFilterParams {
